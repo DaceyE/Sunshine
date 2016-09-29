@@ -1,8 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <dimen name="digital_text_size">40dp</dimen>
-    <dimen name="digital_text_size_round">45dp</dimen>
+    <!-- START OF Text Sizes -->
+        <dimen name="digital_text_size">40dp</dimen>
+        <dimen name="digital_text_size_round">45dp</dimen>
+
+        <dimen name="digital_date_text_size">12dp</dimen>
+        <dimen name="digital_date_text_size_round">14dp</dimen>
+
+        <dimen name="digital_weather_text_size">20dp</dimen>
+        <dimen name="digital_weather_text_size_round">25dp</dimen>
+    <!-- END OF OF Text Sizes -->
+
+    <dimen name="digital_weather_icon_size">20dp</dimen>
+    <dimen name="digital_weather_icon_size_round">25dp</dimen>
+
     <dimen name="digital_x_offset">15dp</dimen>
     <dimen name="digital_x_offset_round">25dp</dimen>
+
     <dimen name="digital_y_offset">90dp</dimen>
+
+    <!-- START OF percent based offsets -->
+        <fraction name="digital_y_time_offset">43.75%</fraction>
+        <fraction name="digital_y_date_offset">55.125%</fraction>
+        <fraction name="digital_y_line_offset">65.625%</fraction>
+        <fraction name="digital_y_weather_offset">83.375%</fraction>
+
+        <fraction name="digital_x_weather_offset">100%</fraction>
+        <fraction name="digital_x_weather_offset_round">90%</fraction>
+    <!-- END OF OF percent based offsets -->
 </resources>
