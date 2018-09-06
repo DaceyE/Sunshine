@@ -36,6 +36,7 @@ import com.example.android.sunshine.app.R;
 import com.example.android.sunshine.app.Utility;
 import com.example.android.sunshine.app.data.WeatherContract;
 import com.example.android.sunshine.app.muzei.WeatherMuzeiSource;
+import com.example.android.sunshine.app.WeatherDataService;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -369,6 +370,23 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter {
                 updateWidgets();
                 updateMuzei();
                 notifyWeather();
+
+                //Send data to watch
+                ContentValues day1 = cVVector.get(0); //Today's weather
+                ContentValues day2 = cVVector.get(1); //Tomorrow's weather
+
+                WeatherDataService.startActionSendWeatherData(context,
+                        Time.getJulianDay(day1.getAsLong(WeatherContract.WeatherEntry.COLUMN_DATE), dayTime.gmtoff),
+                        Utility.formatTemperature(context, day1.getAsDouble(WeatherContract.WeatherEntry.COLUMN_MAX_TEMP)),
+                        Utility.formatTemperature(context, day1.getAsDouble(WeatherContract.WeatherEntry.COLUMN_MIN_TEMP)),
+                        day1.getAsInteger(WeatherContract.WeatherEntry.COLUMN_WEATHER_ID),
+
+                        Time.getJulianDay(day2.getAsLong(WeatherContract.WeatherEntry.COLUMN_DATE), dayTime.gmtoff),
+                        Utility.formatTemperature(context, day2.getAsDouble(WeatherContract.WeatherEntry.COLUMN_MAX_TEMP)),
+                        Utility.formatTemperature(context, day2.getAsDouble(WeatherContract.WeatherEntry.COLUMN_MIN_TEMP)),
+                        day2.getAsInteger(WeatherContract.WeatherEntry.COLUMN_WEATHER_ID)
+                );
+
             }
             Log.d(LOG_TAG, "Sync Complete. " + cVVector.size() + " Inserted");
             setLocationStatus(getContext(), LOCATION_STATUS_OK);

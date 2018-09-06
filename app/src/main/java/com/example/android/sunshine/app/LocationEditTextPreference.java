@@ -70,7 +70,7 @@ public class LocationEditTextPreference extends EditTextPreference {
         currentLocation.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                Context context = getContext();
+                Activity context = (Activity) getContext();
 
                 // Launch the Place Picker so that the user can specify their location, and then
                 // return the result to SettingsActivity.

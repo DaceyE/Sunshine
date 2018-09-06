@@ -14,17 +14,20 @@
  * limitations under the License.
  */
 
-package com.example.sunshine;
+package com.example.android.sunshine.app;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.ColorMatrix;
+import android.graphics.ColorMatrixColorFilter;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.RectF;
@@ -36,7 +39,6 @@ import android.support.annotation.Nullable;
 import android.support.wearable.watchface.CanvasWatchFaceService;
 import android.support.wearable.watchface.WatchFaceStyle;
 import android.text.format.Time;
-import android.util.Log;
 import android.view.SurfaceHolder;
 import android.view.WindowInsets;
 
@@ -89,14 +91,27 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
     }
 
     private class Engine extends CanvasWatchFaceService.Engine {
-        final Handler mUpdateTimeHandler = new EngineHandler(this);
-        boolean mRegisteredTimeZoneReceiver = false;
+        byte weatherDateState;
+        boolean mToggle;
+        int mLastDate;
+
+        final byte CURRENT_DAY_STATE = 0;
+        final byte TOMORROW_STATE = 1;
+        final byte OUT_OF_DATE_STATE = 2;
+
+        String mHigh = "NA\u00b0";
+        String mLow = "NA\u00b0";
+        static final String defaultDegrees = "NA\u00b0";
+
+        Bitmap mWeatherBitmap;
+        int weatherId = Integer.MIN_VALUE;
 
         Paint mBackgroundPaint;
         Paint mTimeTextPaint;
         Paint mDateTextPaint;
         Paint mHighTextPaint;
         Paint mLowTextPaint;
+        Paint mGrayBitmapPaint;
 
         /**
          *  Tells the createTextPaint(int,int) method to return the mTimeTextPaint
@@ -118,7 +133,28 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
          */
         final int PAINT_LOW = 3;
 
+
+        float mXOffset;
+        float mYOffset;
+        float mYTimeOffset;
+        float mYDateOffset;
+        float mYLineOffset;
+        float mYWeatherOffset;
+        float mXWeatherOffset;
+        float mWeatherIconSize;
+
+        Resources resources;
+        SharedPreferences weatherPreferences;
+
+        boolean mAmbient;
+        boolean mLowBitAmbient;
+        boolean mBurnInProtection;
+
         Time mTime;
+
+        final Handler mUpdateTimeHandler = new EngineHandler(this);
+        boolean mRegisteredTimeZoneReceiver = false;
+
         final BroadcastReceiver mTimeZoneReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
@@ -127,31 +163,6 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
             }
         };
 
-        float mXOffset;
-        float mYOffset;
-        float mYTimeOffset;
-        float mYDateOffset;
-        float mYLineOffset;
-        float mYWeatherOffset;
-
-        float mXWeatherOffset;
-        float mWeatherIconSize;
-
-        Bitmap mWeatherBitmap;
-
-        boolean mAmbient;
-
-        /**
-         * Whether the display supports fewer bits for each color in ambient mode. When true, we
-         * disable anti-aliasing in ambient mode.
-         */
-        boolean mLowBitAmbient;
-
-        boolean mBurnInProtection;
-
-
-        String mHigh = "NA\u00b0";
-        String mLow = "NA\u00b0";
 
         @Override
         public void onCreate(SurfaceHolder holder) {
@@ -162,8 +173,7 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
                     .setBackgroundVisibility(WatchFaceStyle.BACKGROUND_VISIBILITY_INTERRUPTIVE)
                     .setShowSystemUiTime(false)
                     .build());
-            Resources resources = WeatherWatchFace.this.getResources();
-            mYOffset = resources.getDimension(R.dimen.digital_y_offset);
+            resources = WeatherWatchFace.this.getResources();
 
             mBackgroundPaint = new Paint();
             mBackgroundPaint.setColor(resources.getColor(R.color.background));
@@ -175,47 +185,53 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
             mDateTextPaint = createTextPaint(textColor2, PAINT_DATE);
             mHighTextPaint = createTextPaint(textColor1, PAINT_HIGH);
             mLowTextPaint = createTextPaint(textColor2, PAINT_LOW);
+            mGrayBitmapPaint = new Paint();
+            ColorMatrix colorMatrix = new ColorMatrix();
+            colorMatrix.setSaturation(0);
+            ColorMatrixColorFilter filter = new ColorMatrixColorFilter(colorMatrix);
+            mGrayBitmapPaint.setColorFilter(filter);
 
-            mWeatherBitmap = BitmapFactory.decodeResource(resources, R.drawable.question_mark);
-
+            mYOffset = resources.getDimension(R.dimen.digital_y_offset);
             mYTimeOffset = resources.getFraction(R.fraction.digital_y_time_offset, 1, 1);
             mYDateOffset = resources.getFraction(R.fraction.digital_y_date_offset, 1, 1);
             mYLineOffset = resources.getFraction(R.fraction.digital_y_line_offset, 1, 1);
             mYWeatherOffset = resources.getFraction(R.fraction.digital_y_weather_offset, 1, 1);
 
+            weatherPreferences = getApplicationContext().getSharedPreferences(
+                    resources.getString(R.string.shared_preferences_weather_key),
+                    Context.MODE_PRIVATE);
+
             mTime = new Time();
+            mTime.setToNow();
+            int today = mTime.getJulianDay(System.currentTimeMillis(),mTime.gmtoff);
+            int date1 = weatherPreferences.getInt(WeatherListenerService.DATE1_KEY, Integer.MIN_VALUE);
+
+            if (today == date1) {
+                weatherDateState = CURRENT_DAY_STATE;
+                mLastDate = date1;
+                loadWeatherData();
+            } else {
+                int date2 = weatherPreferences.getInt(WeatherListenerService.DATE2_KEY, Integer.MIN_VALUE);
+                if (today == date2) {
+                    weatherDateState = TOMORROW_STATE;
+                    mLastDate = date2;
+                    loadWeatherData();
+                } else {
+                    weatherDateState = OUT_OF_DATE_STATE;
+                    mLastDate = today;
+                    loadWeatherData();
+                }
+            }
+
+            mWeatherBitmap = BitmapFactory.decodeResource(resources, getIconResourceForWeatherCondition(weatherId));
+
+            mToggle = WeatherListenerService.getToggle();
         }
 
         @Override
         public void onDestroy() {
             mUpdateTimeHandler.removeMessages(MSG_UPDATE_TIME);
             super.onDestroy();
-        }
-
-        /**
-         *
-         * @param textColor
-         * @param paintId
-         * @return
-         */
-        private Paint createTextPaint(int textColor,int paintId) {
-            Paint paint = new Paint();
-
-            //Currently all the text paints are handled the same way.
-//            switch (paintId) {
-//                case PAINT_TIME:
-//                    break;
-//                case PAINT_DATE:
-//                    break;
-//                case PAINT_HIGH:
-//                    break;
-//                case PAINT_LOW:
-//                    break;
-//            }
-            paint.setColor(textColor);
-            paint.setTypeface(NORMAL_TYPEFACE);
-            paint.setAntiAlias(true);
-            return paint;
         }
 
         @Override
@@ -258,8 +274,6 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
         public void onApplyWindowInsets(WindowInsets insets) {
             super.onApplyWindowInsets(insets);
 
-            // Load resources that have alternate values for round watches.
-            Resources resources = WeatherWatchFace.this.getResources();
             boolean isRound = insets.isRound();
 
             float weatherTextSize;
@@ -342,7 +356,6 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
 
             canvas.drawText(text, (width- mTimeTextPaint.measureText(text))/2,
                     height*mYTimeOffset, mTimeTextPaint);
-            Log.i("mywatch", Float.toString(height * mYTimeOffset));
 
             String dateText = weekDayFormat(mTime.weekDay)
                       + ", " + monthFormat(mTime.month)
@@ -355,6 +368,43 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
             canvas.drawLine(centerX-35,yLineOffset,
                     centerX+35,yLineOffset, mDateTextPaint);
 
+
+            //Move state matchine to method
+            if ( mTime.getJulianDay(System.currentTimeMillis(),mTime.gmtoff) != mLastDate || (mToggle != WeatherListenerService.getToggle())) { //bug 1,
+                switch (weatherDateState) {
+                    case CURRENT_DAY_STATE:
+                        if (mToggle == WeatherListenerService.getToggle()) {
+                            weatherDateState = TOMORROW_STATE; //Move up a state
+                            loadWeatherData();
+                        } else {
+                            //Preserve state, but get the new data
+                            mToggle = WeatherListenerService.getToggle();
+                            loadWeatherData();
+                        }
+                        break;
+                    case TOMORROW_STATE:
+                        if (mToggle == WeatherListenerService.getToggle()) {
+                            weatherDateState = OUT_OF_DATE_STATE; //Move up a state
+                            loadWeatherData();
+                        } else {
+                            weatherDateState = CURRENT_DAY_STATE;  //Reset to initial state
+                            mToggle = WeatherListenerService.getToggle();
+                            loadWeatherData();
+                        }
+                        break;
+                    case OUT_OF_DATE_STATE:
+                        if (mToggle == WeatherListenerService.getToggle()) { //bug 2
+                            // Preserve state and data.  There is no new data
+                        } else {
+                            weatherDateState = CURRENT_DAY_STATE; //Reset to initial state
+                            mToggle = WeatherListenerService.getToggle();
+                            loadWeatherData();
+                        }
+                        break;
+                }
+                mLastDate =  mTime.getJulianDay(System.currentTimeMillis(),mTime.gmtoff); //Update the last day.
+            }
+
             float yWeatherOffset = height*mYWeatherOffset;
             float xHighOffset = ( width- mHighTextPaint.measureText(mHigh) )/2;
 
@@ -365,7 +415,6 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
                     mXWeatherOffset*(width - ((xHighOffset + mLowTextPaint.measureText(mLow))/2)),
                     yWeatherOffset, mLowTextPaint);
 
-            //TODO draw gray bitmap if in ambient && !(LowBit||BurnInProtection)
             if (mAmbient && (mLowBitAmbient || mBurnInProtection)) {
                 //Do nothing, so don't draw the weather bitmap
             } else {
@@ -373,13 +422,25 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
                 float weatherIconSizeHalf = mWeatherIconSize/2;
                 float weatherIconXCenter = (width/4)/mXWeatherOffset;
 
-                canvas.drawBitmap(mWeatherBitmap,
-                        null,
-                        new RectF(weatherIconXCenter - weatherIconSizeHalf,
-                                yWeatherOffset - mWeatherIconSize,
-                                weatherIconXCenter + weatherIconSizeHalf,
-                                yWeatherOffset),
-                        null);
+                if (mAmbient) {
+                    if ( !(mBurnInProtection || mLowBitAmbient) ) {
+                        canvas.drawBitmap(mWeatherBitmap,
+                                null,
+                                new RectF(weatherIconXCenter - weatherIconSizeHalf,
+                                        yWeatherOffset - mWeatherIconSize,
+                                        weatherIconXCenter + weatherIconSizeHalf,
+                                        yWeatherOffset),
+                                mGrayBitmapPaint);
+                    }  // else don't draw the bitmap
+                } else {
+                    canvas.drawBitmap(mWeatherBitmap,
+                            null,
+                            new RectF(weatherIconXCenter - weatherIconSizeHalf,
+                                    yWeatherOffset - mWeatherIconSize,
+                                    weatherIconXCenter + weatherIconSizeHalf,
+                                    yWeatherOffset),
+                            null);
+                }
             }
         }
 
@@ -478,5 +539,98 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
                     return null;
             }
         }
+
+        /**
+         * Helper method to provide the icon resource id according to the weather condition id returned
+         * by the OpenWeatherMap call.
+         * @param weatherId from OpenWeatherMap API response
+         * @return resource id for the corresponding icon. -1 if no relation is found.
+         */
+        public int getIconResourceForWeatherCondition(int weatherId) {
+            // Based on weather code data found at:
+            // http://bugs.openweathermap.org/projects/api/wiki/Weather_Condition_Codes
+            if (weatherId >= 200 && weatherId <= 232) {
+                return R.drawable.ic_storm;
+            } else if (weatherId >= 300 && weatherId <= 321) {
+                return R.drawable.ic_light_rain;
+            } else if (weatherId >= 500 && weatherId <= 504) {
+                return R.drawable.ic_rain;
+            } else if (weatherId == 511) {
+                return R.drawable.ic_snow;
+            } else if (weatherId >= 520 && weatherId <= 531) {
+                return R.drawable.ic_rain;
+            } else if (weatherId >= 600 && weatherId <= 622) {
+                return R.drawable.ic_snow;
+            } else if (weatherId >= 701 && weatherId <= 761) {
+                return R.drawable.ic_fog;
+            } else if (weatherId == 761 || weatherId == 781) {
+                return R.drawable.ic_storm;
+            } else if (weatherId == 800) {
+                return R.drawable.ic_clear;
+            } else if (weatherId == 801) {
+                return R.drawable.ic_light_clouds;
+            } else if (weatherId >= 802 && weatherId <= 804) {
+                return R.drawable.ic_cloudy;
+            } else  {
+                return R.drawable.question_mark;
+            }
+        }
+
+        /**
+         *
+         * @param textColor
+         * @param paintId
+         * @return
+         */
+        private Paint createTextPaint(int textColor,int paintId) {
+            Paint paint = new Paint();
+
+            //Currently all the text paints are handled the same way.
+//            switch (paintId) {
+//                case PAINT_TIME:
+//                    break;
+//                case PAINT_DATE:
+//                    break;
+//                case PAINT_HIGH:
+//                    break;
+//                case PAINT_LOW:
+//                    break;
+//            }
+            paint.setColor(textColor);
+            paint.setTypeface(NORMAL_TYPEFACE);
+            paint.setAntiAlias(true);
+            return paint;
+        }
+
+        void loadWeatherData() {
+            int previousWeatherId = weatherId;
+
+            if (weatherDateState == CURRENT_DAY_STATE) {
+                mHigh = weatherPreferences.getString(WeatherListenerService.MAX1_KEY, defaultDegrees);
+                mLow = weatherPreferences.getString(WeatherListenerService.MIN1_KEY, defaultDegrees);
+                weatherId = weatherPreferences.getInt(WeatherListenerService.WEATHER_ID1_KEY, Integer.MIN_VALUE);
+
+                if(weatherId != previousWeatherId) {
+                    mWeatherBitmap = BitmapFactory.decodeResource(resources, getIconResourceForWeatherCondition(weatherId));
+                }
+            } else if (weatherDateState == TOMORROW_STATE) {
+                mHigh = weatherPreferences.getString(WeatherListenerService.MAX2_KEY, defaultDegrees);
+                mLow = weatherPreferences.getString(WeatherListenerService.MIN2_KEY, defaultDegrees);
+                weatherId = weatherPreferences.getInt(WeatherListenerService.WEATHER_ID2_KEY, Integer.MIN_VALUE);
+
+                if(weatherId != previousWeatherId) {
+                    mWeatherBitmap = BitmapFactory.decodeResource(resources, getIconResourceForWeatherCondition(weatherId));
+                }
+            } else { // weatherDateSate == OUT_OF_DATE_STATE
+                mHigh = defaultDegrees;
+                mLow = defaultDegrees;
+                weatherId = Integer.MIN_VALUE;
+
+                if(weatherId != previousWeatherId) {
+                    mWeatherBitmap = BitmapFactory.decodeResource(resources, getIconResourceForWeatherCondition(weatherId));
+                }
+            }
+        }
+
     }
 }
